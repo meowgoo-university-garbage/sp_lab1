@@ -72,22 +72,27 @@ int main() {
     Meowlloc_HeaderBlockFree *tree = null;
 
 
-#define BLOCK(name, x) \
-    Meowlloc_HeaderBlockFree name = { .header = { .size = (x) } }; \
-    meowlloc_rbtree_insertBlock(&tree, &name)
+#define BLOCK(x) \
+    Meowlloc_HeaderBlockFree block##x = { .header = { .size = (x) } }; \
+    meowlloc_rbtree_insertBlock(&tree, &block##x)
 
-    BLOCK(block1, 2);
-    BLOCK(block2, 4);
-    BLOCK(block3, 6);
-    BLOCK(block4, 8);
-    BLOCK(block5, 16);
-    BLOCK(block6, 32);
-    BLOCK(block7, 64);
-    BLOCK(block8, 128);
+    BLOCK(2);
+    BLOCK(4);
+    BLOCK(6);
+    BLOCK(8);
+    BLOCK(16);
+    BLOCK(32);
+    BLOCK(64);
+    BLOCK(128);
 
     printf("%d\n", tree->header.size);
     printf("%d\n", tree->header.size);
 
+    meowlloc_rbtree_printNode(tree);
+    printf("\n");
+
+    meowlloc_rbtree_removeBlock(&tree, &block2, meowlloc_rbtree_getGeneration(tree, &block2, (Meowlloc_RbtreeGeneration){0}));
+    meowlloc_rbtree_removeBlock(&tree, &block32, meowlloc_rbtree_getGeneration(tree, &block32, (Meowlloc_RbtreeGeneration){0}));
     meowlloc_rbtree_printNode(tree);
     printf("\n");
 
