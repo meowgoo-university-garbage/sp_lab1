@@ -97,9 +97,13 @@ int main() {
 
     printf("TREE\n");
     meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
-    meowlloc_allocate(5);
+    int *allocation_0 = meowlloc_allocate(5);
     meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
-    meowlloc_allocate(5);
+    int *allocation_1 = meowlloc_allocate(5);
+    meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
+    meowlloc_free(allocation_0);
+    meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
+    meowlloc_free(allocation_1);
     meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
 
 

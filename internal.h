@@ -14,9 +14,10 @@ typedef struct Meowlloc_HeaderBlock Meowlloc_HeaderBlock;
 struct Meowlloc_HeaderBlock {
     union {
         Meowlloc_HeaderBlock *previous;
-        bool isReserved;
+        uint64_t isReserved; // NOTE: this can't be `bool` because we need to compare all 64 bits of the pointer, while bool is only the lower 8 bits and might give false negatives
     };
-    size_t size; // NOTE: bit 0 stores 0 == black, 1 == red for the rbtree
+    // NOTE: bit 0 stores 0 == black, 1 == red for the rbtree
+    size_t size; 
 };
 
 
