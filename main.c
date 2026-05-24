@@ -88,13 +88,20 @@ int main() {
     printf("%d\n", tree->header.size);
     printf("%d\n", tree->header.size);
 
-    meowlloc_rbtree_printNode(tree);
-    printf("\n");
+    meowlloc_rbtree_printNode(tree, true);
 
     meowlloc_rbtree_removeBlock(&tree, &block2, meowlloc_rbtree_getGeneration(tree, &block2, (Meowlloc_RbtreeGeneration){0}));
     meowlloc_rbtree_removeBlock(&tree, &block32, meowlloc_rbtree_getGeneration(tree, &block32, (Meowlloc_RbtreeGeneration){0}));
-    meowlloc_rbtree_printNode(tree);
-    printf("\n");
+    meowlloc_rbtree_printNode(tree, true);
+
+
+    printf("TREE\n");
+    meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
+    meowlloc_allocate(5);
+    meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
+    meowlloc_allocate(5);
+    meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
+
 
     return 0;
 }

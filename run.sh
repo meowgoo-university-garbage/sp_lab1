@@ -1,1 +1,1 @@
-gcc ./main.c -o ./bin/out -g && ./bin/out
+gcc ./main.c -o ./bin/out -g -Wall -Wextra -Wpedantic && ./bin/out
