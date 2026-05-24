@@ -33,10 +33,6 @@ typedef struct {
     Meowlloc_HeaderBlockFree *this;
 } Meowlloc_RbtreeGeneration;
 
-Meowlloc_HeaderBlockFree **Meowlloc_rbtree_getChildPointer(Meowlloc_HeaderBlockFree *root, Meowlloc_HeaderBlockFree *child, Meowlloc_HeaderBlockFree **tree) {
-    return (root != null) ? (root->lhs == child ? &root->lhs : &root->rhs) : tree;
-}
-
 Meowlloc_RbtreeGeneration meowlloc_rbtree_rotateGeneration(Meowlloc_RbtreeGeneration gen, Meowlloc_HeaderBlockFree *new) {
     gen.grandgrandfather = gen.grandfather;
     gen.grandfather = gen.parent;
@@ -50,6 +46,10 @@ Meowlloc_RbtreeGeneration meowlloc_rbtree_rotateGeneration(Meowlloc_RbtreeGenera
     }
 
     return gen;
+}
+
+Meowlloc_HeaderBlockFree **Meowlloc_rbtree_getChildPointer(Meowlloc_HeaderBlockFree *root, Meowlloc_HeaderBlockFree *child, Meowlloc_HeaderBlockFree **tree) {
+    return (root != null) ? (root->lhs == child ? &root->lhs : &root->rhs) : tree;
 }
 
 Meowlloc_RbtreeGeneration meowlloc_rbtree_insertBlockRec(Meowlloc_HeaderBlockFree *root, Meowlloc_HeaderBlockFree *block, Meowlloc_RbtreeGeneration gen) {
@@ -100,17 +100,19 @@ void meowlloc_rbtree_printNode(Meowlloc_HeaderBlockFree *node) {
 void meowlloc_rbtree_rotateLeft(Meowlloc_RbtreeGeneration gen, bool rotate, Meowlloc_HeaderBlockFree **tree) {
     if(rotate) gen = meowlloc_rbtree_rotateGeneration(gen, null);
 
-    gen.grandfather->rhs = gen.parent->lhs;
-    gen.parent->lhs = gen.grandfather;
-    *Meowlloc_rbtree_getChildPointer(gen.grandgrandfather, gen.grandfather, tree) = gen.parent;
+    Meowlloc_HeaderBlockFree *pivot = gen.grandfather->rhs;
+    gen.grandfather->rhs = pivot->lhs;
+    pivot->lhs = gen.grandfather;
+    *Meowlloc_rbtree_getChildPointer(gen.grandgrandfather, gen.grandfather, tree) = pivot;
 }
 
 void meowlloc_rbtree_rotateRight(Meowlloc_RbtreeGeneration gen, bool rotate, Meowlloc_HeaderBlockFree **tree) {
     if(rotate) gen = meowlloc_rbtree_rotateGeneration(gen, null);
 
-    gen.grandfather->lhs = gen.parent->rhs;
-    gen.parent->rhs = gen.grandfather;
-    *Meowlloc_rbtree_getChildPointer(gen.grandgrandfather, gen.grandfather, tree) = gen.parent;
+    Meowlloc_HeaderBlockFree *pivot = gen.grandfather->lhs;
+    gen.grandfather->lhs = pivot->rhs;
+    pivot->rhs = gen.grandfather;
+    *Meowlloc_rbtree_getChildPointer(gen.grandgrandfather, gen.grandfather, tree) = pivot;
 }
 
 void meowlloc_rbtree_insertBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_HeaderBlockFree *block) {
@@ -194,6 +196,10 @@ void meowlloc_rbtree_removeBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_Heade
 
         bool swapGenClose = (node == swapGen.parent);
 
+        printf("REMOVE SWAP\n");
+        meowlloc_rbtree_printNode(swapGen.this);
+        printf("\n");
+
         // NOTE: i checked with pen and paper and it should work, but looks a bit scary
         *Meowlloc_rbtree_getChildPointer(gen.parent, node, tree) = swapGen.this;
         *Meowlloc_rbtree_getChildPointer(swapGen.parent, swapGen.this, null) = node;
@@ -206,6 +212,15 @@ void meowlloc_rbtree_removeBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_Heade
         swapGen.this->lhs = preserve.lhs;
         swapGen.this->rhs = preserve.rhs;
 
+        bool isNodeRed = MEOWLLOC_RBTREE_ISRED(node);
+        bool isSwapRed = MEOWLLOC_RBTREE_ISRED(swapGen.this);
+
+        node->header.size &= ~MEOWLLOC_RBTREE_RED;
+        node->header.size |= (isSwapRed * 0b1);
+
+        swapGen.this->header.size &= ~MEOWLLOC_RBTREE_RED;
+        swapGen.this->header.size |= (isNodeRed * 0b1);
+
         // NOTE: since we have exchanged blocks, the to-be-removed block is violating
         // the sorting conditions and we are unable to locate it normally
         if(swapGenClose) {
@@ -217,9 +232,18 @@ void meowlloc_rbtree_removeBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_Heade
 
         swapGen = meowlloc_rbtree_rotateGeneration(swapGen, node);
 
+        printf("AFTER SWAP\n");
+        meowlloc_rbtree_printNode(*tree);
+        printf("\n");
+        meowlloc_rbtree_printNode(node);
+        printf("\n");
+        meowlloc_rbtree_printNode(swapGen.parent);
+        printf("\n");
+
         meowlloc_rbtree_removeBlock(tree, node, swapGen);
         return;
     }
+
 
     if(MEOWLLOC_RBTREE_ISRED(node)) {
         *Meowlloc_rbtree_getChildPointer(gen.parent, node, tree) = null;
@@ -237,29 +261,26 @@ void meowlloc_rbtree_removeBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_Heade
     gen.this = child;
 
     do {
+        // case 1
         if(gen.parent == null) {
             break;
         }
 
-
+        // case 2
         Meowlloc_HeaderBlockFree *brother = (gen.parent->lhs == gen.this) ? gen.parent->rhs : gen.parent->lhs;
         if(MEOWLLOC_RBTREE_ISRED(brother)) {
             gen.parent->header.size |= MEOWLLOC_RBTREE_RED;
             brother->header.size &= ~MEOWLLOC_RBTREE_RED;
 
-            Meowlloc_HeaderBlockFree *preserve = gen.this;
             if(gen.this == gen.parent->lhs) {
-                gen.this = brother;
                 meowlloc_rbtree_rotateLeft(gen, true, tree);
             }
             else {
-                gen.this = brother;
                 meowlloc_rbtree_rotateRight(gen, true, tree);
             }
-            // NOTE: this might be unnecessary
-            gen.this = preserve;
         }
 
+        // case 3
         bool brotherFullyBlack = MEOWLLOC_RBTREE_ISBLACK(brother) &&
                                  MEOWLLOC_RBTREE_ISBLACK(brother->lhs) &&
                                  MEOWLLOC_RBTREE_ISBLACK(brother->rhs);
@@ -269,6 +290,7 @@ void meowlloc_rbtree_removeBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_Heade
             continue;
         }
 
+        // case 4
         if(MEOWLLOC_RBTREE_ISRED(gen.parent) && brotherFullyBlack) {
             brother->header.size |= MEOWLLOC_RBTREE_RED;
             gen.parent->header.size &= ~MEOWLLOC_RBTREE_RED;
@@ -276,26 +298,28 @@ void meowlloc_rbtree_removeBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_Heade
         }
 
 
+        // case 5
         if(MEOWLLOC_RBTREE_ISBLACK(brother)) {
-            Meowlloc_HeaderBlockFree *preserve = gen.this;
             if(gen.this == gen.parent->lhs && MEOWLLOC_RBTREE_ISRED(brother->lhs) && MEOWLLOC_RBTREE_ISBLACK(brother->rhs)) {
                 brother->header.size |= MEOWLLOC_RBTREE_RED;
                 brother->lhs->header.size &= ~MEOWLLOC_RBTREE_RED;
 
-                gen.this = brother;
-                meowlloc_rbtree_rotateRight(gen, true, tree);
-                // TODO: rotate right
+                Meowlloc_RbtreeGeneration ggen = gen;
+                ggen.this = brother;
+                ggen = meowlloc_rbtree_rotateGeneration(ggen, null);
+
+                meowlloc_rbtree_rotateRight(ggen, true, tree);
             }
             else if(gen.this == gen.parent->rhs && MEOWLLOC_RBTREE_ISBLACK(brother->lhs) && MEOWLLOC_RBTREE_ISRED(brother->rhs)) {
                 brother->header.size |= MEOWLLOC_RBTREE_RED;
                 brother->rhs->header.size &= ~MEOWLLOC_RBTREE_RED;
 
-                gen.this = brother;
-                meowlloc_rbtree_rotateLeft(gen, true, tree);
-                // TODO: rotate left
-            }
+                Meowlloc_RbtreeGeneration ggen = gen;
+                ggen.this = brother;
+                ggen = meowlloc_rbtree_rotateGeneration(ggen, null);
 
-            gen.this = preserve;
+                meowlloc_rbtree_rotateLeft(ggen, true, tree);
+            }
         }
 
         if(MEOWLLOC_RBTREE_ISBLACK(gen.parent)) {
@@ -310,12 +334,10 @@ void meowlloc_rbtree_removeBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_Heade
         Meowlloc_HeaderBlockFree *preserve = gen.this;
         if(gen.this == gen.parent->lhs) {
             brother->rhs->header.size &= ~MEOWLLOC_RBTREE_RED;
-            gen.this = brother;
             meowlloc_rbtree_rotateLeft(gen, true, tree);
         }
         else {
             brother->lhs->header.size &= ~MEOWLLOC_RBTREE_RED;
-            gen.this = brother;
             meowlloc_rbtree_rotateRight(gen, true, tree);
         }
 
