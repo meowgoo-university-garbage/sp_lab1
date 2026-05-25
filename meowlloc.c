@@ -5,13 +5,11 @@
 #include <string.h>
 #include <errno.h>
 
-#include <unistd.h>
-#include <sys/mman.h>
-
 #include "internal.h"
 #include "meowlloc.h"
 #include "macros.h"
 #include "rbtree.c"
+#include "kernel.h"
 
 
 #define SZ(x) ((x) & MEOWLLOC_SIZEMASK)
@@ -65,8 +63,8 @@ void meowlloc_internal_releasePages(Meowlloc_HeaderBlockFree *block) {
     if(nlhs >= nrhs) return;
 
     size_t difference = nrhs - nlhs;
-    madvise((void *)nlhs, difference, MADV_FREE);
-    printf("MADVISED: %p %ld\n", nlhs, difference);
+    // madvise((void *)nlhs, difference, MADV_FREE);
+    meowlloc_kernel_unuseMemory((void *)nlhs, difference);
 }
 
 void meowlloc_internal_initializeArena(char *arenaBytes, size_t len) {
@@ -99,15 +97,16 @@ void meowlloc_internal_initializeArena(char *arenaBytes, size_t len) {
     };
 }
 
-// NOTE: returns MAP_FAILED on error
+// NOTE: returns MEOWLLOC_KERNEL_ERROR on error
 char *meowlloc_internal_newArena(size_t desiredAllocationSize) {
     desiredAllocationSize += sizeof(Meowlloc_HeaderBlock) + sizeof(Meowlloc_HeaderBlockFinal);
     size_t size = meowlloc_internal_sizeToPages(desiredAllocationSize) * MEOWLLOC_CONFIG_PAGESIZE;
     if(size < MEOWLLOC_CONFIG_ARENASIZE) size = MEOWLLOC_CONFIG_ARENASIZE;
     assert(size % MEOWLLOC_CONFIG_PAGESIZE == 0);
 
-    char *arena = mmap(null, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if(arena == MAP_FAILED) return arena;
+    // char *arena = mmap(null, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    char *arena = meowlloc_kernel_acquireMemory(size);
+    if(arena == MEOWLLOC_KERNEL_ERROR) return arena;
 
     meowlloc_internal_initializeArena(arena, size);
 
@@ -175,7 +174,7 @@ void *meowlloc_allocate(size_t size) {
 
     if(gen.this == null) {
         char *mmapResult = meowlloc_internal_newArena(size);
-        if(mmapResult == MAP_FAILED) {
+        if(mmapResult == MEOWLLOC_KERNEL_ERROR) {
             fprintf(stderr, "mmap failed, errno: %d\n", errno);
             return null;
         }
@@ -318,7 +317,8 @@ void meowlloc_free(void *old) {
     // these arenas are still munmappble, as long as another alloc/free is performed. So the worst case
     // scenario is having 1 unused arena.
     if(meowlloc_internal_isSingleBlock(block) && MEOWLLOC_TREE != null) {
-        munmap(block, sizeof(Meowlloc_HeaderBlock) + SZ(block->size) + sizeof(Meowlloc_HeaderBlockFinal));
+        // munmap(block, sizeof(Meowlloc_HeaderBlock) + SZ(block->size) + sizeof(Meowlloc_HeaderBlockFinal));
+        meowlloc_kernel_releaseMemory(block, sizeof(Meowlloc_HeaderBlock) + SZ(block->size) + sizeof(Meowlloc_HeaderBlockFinal));
     }
     else {
         meowlloc_rbtree_insertBlock(&MEOWLLOC_TREE, freeBlock);
