@@ -37,6 +37,38 @@ bool meowlloc_internal_isSingleBlock(Meowlloc_HeaderBlock *block) {
     return meowlloc_internal_isFinal(next) && ((Meowlloc_HeaderBlockFinal *)next)->initial == block;
 }
 
+size_t meowlloc_internal_sizeToHeaders(size_t size) {
+    size_t n = size / sizeof(Meowlloc_HeaderBlock);
+    size_t r = size % sizeof(Meowlloc_HeaderBlock);
+    if(r != 0) n += 1;
+    return n;
+}
+
+size_t meowlloc_internal_sizeToPages(size_t size) {
+    size_t n = size / MEOWLLOC_CONFIG_PAGESIZE;
+    size_t r = size % MEOWLLOC_CONFIG_PAGESIZE;
+    if(r != 0) n += 1;
+    return n;
+}
+
+void meowlloc_internal_releasePages(Meowlloc_HeaderBlockFree *block) {
+    // NOTE: casting uintptr_t to size_t is probably not the most consistent thing,
+    // but it's not that bad, i just dont want to duplicate sizeToPages
+    size_t lhs = (size_t)((uintptr_t)(block + 1));
+    size_t rhs = (size_t)(lhs + SZ(block->header.size));
+
+    // NOTE: we need page alignment
+    size_t nlhs = meowlloc_internal_sizeToPages(lhs) * MEOWLLOC_CONFIG_PAGESIZE;
+    size_t nrhs = meowlloc_internal_sizeToPages(rhs) * MEOWLLOC_CONFIG_PAGESIZE;
+
+    if(nrhs > rhs) nrhs -= MEOWLLOC_CONFIG_PAGESIZE;
+    if(nlhs >= nrhs) return;
+
+    size_t difference = nrhs - nlhs;
+    madvise((void *)nlhs, difference, MADV_FREE);
+    printf("MADVISED: %p %ld\n", nlhs, difference);
+}
+
 void meowlloc_internal_initializeArena(char *arenaBytes, size_t len) {
     assert(len % sizeof(Meowlloc_HeaderBlock) == 0);
     assert(len >= (sizeof(Meowlloc_HeaderBlockFree) + sizeof(Meowlloc_HeaderBlockFinal)));
@@ -51,6 +83,10 @@ void meowlloc_internal_initializeArena(char *arenaBytes, size_t len) {
         .rhs = null,
     };
 
+    if(MEOWLLOC_CONFIG_RELEASEPAGES) {
+        meowlloc_internal_releasePages(block_initial);
+    }
+
     meowlloc_rbtree_insertBlock(&MEOWLLOC_TREE, block_initial);
 
     Meowlloc_HeaderBlockFinal *block_final = (Meowlloc_HeaderBlockFinal *)(arenaBytes + len - sizeof(Meowlloc_HeaderBlockFinal));
@@ -61,20 +97,6 @@ void meowlloc_internal_initializeArena(char *arenaBytes, size_t len) {
         },
         .initial = &block_initial->header,
     };
-}
-
-size_t meowlloc_internal_sizeToHeaders(size_t size) {
-    size_t n = size / sizeof(Meowlloc_HeaderBlock);
-    size_t r = size % sizeof(Meowlloc_HeaderBlock);
-    if(r != 0) n += 1;
-    return n;
-}
-
-size_t meowlloc_internal_sizeToPages(size_t size) {
-    size_t n = size / MEOWLLOC_CONFIG_PAGESIZE;
-    size_t r = size % MEOWLLOC_CONFIG_PAGESIZE;
-    if(r != 0) n += 1;
-    return n;
 }
 
 // NOTE: returns MAP_FAILED on error
@@ -278,7 +300,13 @@ void meowlloc_free(void *old) {
         nextBlock->previous = block;
     }
 
-    memset(block + 1, MEOWLLOC_SENTINEL_FREED, SZ(block->size));
+    if(MEOWLLOC_CONFIG_RELEASEPAGES) {
+        meowlloc_internal_releasePages((Meowlloc_HeaderBlockFree *)block);
+    }
+    else {
+        memset(block + 1, MEOWLLOC_SENTINEL_FREED, SZ(block->size));
+    }
+
     Meowlloc_HeaderBlockFree *freeBlock = (Meowlloc_HeaderBlockFree *)block;
     freeBlock->header.isReserved = false;
 
