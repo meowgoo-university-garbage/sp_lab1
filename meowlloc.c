@@ -5,11 +5,12 @@
 #include <string.h>
 #include <errno.h>
 
-#include "internal.h"
-#include "meowlloc.h"
 #include "macros.h"
-#include "rbtree.c"
+#include "meowlloc.h"
+#include "internal.h"
 #include "kernel.h"
+
+#include "rbtree.c"
 
 
 #define SZ(x) ((x) & MEOWLLOC_SIZEMASK)
@@ -118,7 +119,7 @@ void meowlloc_internal_mergeBlocks(Meowlloc_HeaderBlock *lhs, Meowlloc_HeaderBlo
     Meowlloc_HeaderBlock *nextBlock = meowlloc_internal_getNextBlock(lhs);
     assert(nextBlock == rhs);
 
-    lhs->size += (SZ(rhs->size) + sizeof(Meowlloc_HeaderBlock));
+    lhs->size += (sizeof(Meowlloc_HeaderBlock) + SZ(rhs->size));
 }
 
 // NOTE: MUST NOT split block that is currently in the tree (red/black bit)
@@ -134,6 +135,8 @@ Meowlloc_HeaderBlock *meowlloc_internal_splitBlock(Meowlloc_HeaderBlock *lhs, si
     Meowlloc_HeaderBlock *rhs = lhs + 1 + taken;
     rhs->isReserved = false;
     rhs->size = SZ(lhs->size) - (taken * sizeof(Meowlloc_HeaderBlock) + sizeof(Meowlloc_HeaderBlock));
+
+    assert(meowlloc_internal_getNextBlock(rhs) == meowlloc_internal_getNextBlock(lhs));
 
     lhs->size = taken * sizeof(Meowlloc_HeaderBlock);
 
@@ -170,6 +173,8 @@ void meowlloc_internal_visualizeArena(Meowlloc_HeaderBlock *any) {
 void *meowlloc_allocate(size_t size) {
     if(size == 0) return null;
 
+    size = meowlloc_internal_sizeToHeaders(size) * sizeof(Meowlloc_HeaderBlock);
+
     Meowlloc_RbtreeGeneration gen = meowlloc_rbtree_findBestBlock(MEOWLLOC_TREE, size);
 
     if(gen.this == null) {
@@ -184,7 +189,6 @@ void *meowlloc_allocate(size_t size) {
 
     meowlloc_rbtree_removeBlock(&MEOWLLOC_TREE, gen.this, gen);
 
-    // NOTE: we have enough space for an extra free header which can store 16 bytes
     if(SZ(gen.this->header.size) >= (size + sizeof(Meowlloc_HeaderBlockFree))) {
         Meowlloc_HeaderBlock *rhs = meowlloc_internal_splitBlock(&gen.this->header, size, false);
 
@@ -212,7 +216,21 @@ void *meowlloc_reallocate_shrink(Meowlloc_HeaderBlock *block, size_t newSize) {
 
     if(remainingSize >= sizeof(Meowlloc_HeaderBlockFree)) {
         Meowlloc_HeaderBlock *rhs = meowlloc_internal_splitBlock(block, newSize, false);
-        meowlloc_rbtree_insertBlock(&MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)rhs);
+
+        Meowlloc_HeaderBlock *nextBlock = meowlloc_internal_getNextBlock(rhs);
+
+
+        if(nextBlock->isReserved) {
+            nextBlock->previous = rhs;
+            meowlloc_rbtree_insertBlock(&MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)rhs);
+        }
+        else if(!meowlloc_internal_isFinal(nextBlock)) {
+            Meowlloc_RbtreeGeneration gen = meowlloc_rbtree_getGeneration(MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)nextBlock, (Meowlloc_RbtreeGeneration){0});
+            meowlloc_rbtree_removeBlock(&MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)nextBlock, gen);
+            meowlloc_internal_mergeBlocks(rhs, nextBlock);
+            meowlloc_rbtree_insertBlock(&MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)rhs);
+        }
+
     }
 
     return (block + 1);
@@ -228,6 +246,12 @@ void *meowlloc_reallocate_expand(Meowlloc_HeaderBlock *block, size_t newSize) {
         size_t expandSize = newSize - SZ(block->size);
         if(sizeof(Meowlloc_HeaderBlock) + SZ(nextBlock->size) - expandSize >= sizeof(Meowlloc_HeaderBlockFree)) {
             Meowlloc_HeaderBlock *rhs = meowlloc_internal_splitBlock(nextBlock, expandSize, true);
+
+            Meowlloc_HeaderBlock *nextBlock = meowlloc_internal_getNextBlock(rhs);
+            if(nextBlock->isReserved) {
+                nextBlock->previous = rhs;
+            }
+
             meowlloc_rbtree_insertBlock(&MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)rhs);
         }
 
@@ -277,7 +301,7 @@ void meowlloc_free(void *old) {
     assert(block->isReserved);
 
     Meowlloc_HeaderBlock *previousBlock = block->previous;
-    bool canMergeWithPrevious = (previousBlock != block && !previousBlock->isReserved);
+    bool canMergeWithPrevious = (previousBlock != block && !previousBlock->isReserved) && meowlloc_internal_getNextBlock(previousBlock) == block;
 
     if(canMergeWithPrevious) {
         meowlloc_rbtree_removeBlock(&MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)previousBlock, meowlloc_rbtree_getGeneration(MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)previousBlock, (Meowlloc_RbtreeGeneration){0}));
