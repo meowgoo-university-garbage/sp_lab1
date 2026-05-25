@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stddef.h>
 
+#define MEOWLLOC_CONFIG_ALIGNMENT 8
 #include "meowlloc.c"
 
 
@@ -66,7 +67,7 @@ header really. I actually feel proud wow, this seems solid
 
 
 int main() {
-    printf("Hello, World! %d\n", alignof(max_align_t));
+    // printf("Hello, World! %d\n", alignof(max_align_t));
 
 
     Meowlloc_HeaderBlockFree *tree = null;
@@ -84,9 +85,6 @@ int main() {
     BLOCK(32);
     BLOCK(64);
     BLOCK(128);
-
-    printf("%d\n", tree->header.size);
-    printf("%d\n", tree->header.size);
 
     meowlloc_rbtree_printNode(tree, true);
 

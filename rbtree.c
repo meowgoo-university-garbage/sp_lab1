@@ -4,7 +4,7 @@
 // NOTE: Red-Black tree algorithms taken mostly from here: https://ru.wikipedia.org/wiki/%D0%9A%D1%80%D0%B0%D1%81%D0%BD%D0%BE-%D1%87%D1%91%D1%80%D0%BD%D0%BE%D0%B5_%D0%B4%D0%B5%D1%80%D0%B5%D0%B2%D0%BE
 
 
-
+// GENERATIONS (needed because nodes don't have a parent pointer)
 typedef struct {
     Meowlloc_HeaderBlockFree *grandgrandfather;
     Meowlloc_HeaderBlockFree *grandfather;
@@ -28,8 +28,88 @@ Meowlloc_RbtreeGeneration meowlloc_rbtree_rotateGeneration(Meowlloc_RbtreeGenera
     return gen;
 }
 
+Meowlloc_RbtreeGeneration meowlloc_rbtree_getGeneration(Meowlloc_HeaderBlockFree *root, Meowlloc_HeaderBlockFree *needle, Meowlloc_RbtreeGeneration gen) {
+    gen = meowlloc_rbtree_rotateGeneration(gen, root);
+    if(root == needle) return gen;
+
+    if(needle->header.size > root->header.size) {
+        return meowlloc_rbtree_getGeneration(root->rhs, needle, gen);
+    }
+    else {
+        return meowlloc_rbtree_getGeneration(root->lhs, needle, gen);
+    }
+}
 
 
+
+
+
+
+
+
+// UTILITY
+Meowlloc_HeaderBlockFree **Meowlloc_rbtree_getChildPointer(Meowlloc_HeaderBlockFree *root, Meowlloc_HeaderBlockFree *child, Meowlloc_HeaderBlockFree **tree) {
+    return (root != null) ? (root->lhs == child ? &root->lhs : &root->rhs) : tree;
+}
+
+void meowlloc_rbtree_printNode(Meowlloc_HeaderBlockFree *node, bool newLine) {
+    if(node == null) {
+        printf("null");
+    }
+    else {
+        printf("%ld%c (", node->header.size & ~MEOWLLOC_RBTREE_RED, MEOWLLOC_RBTREE_ISRED(node) ? 'r' : 'b');
+        meowlloc_rbtree_printNode(node->lhs, false);
+        printf(", ");
+        meowlloc_rbtree_printNode(node->rhs, false);
+        printf(")");
+    }
+
+    if(newLine) {
+        printf("\n");
+    }
+}
+
+// NOTE: if tree has only 1 block (i.e. only 1 arena) we don't want to free it
+bool meowlloc_rbtree_isTreeMinimal(Meowlloc_HeaderBlockFree *root) {
+    if(root == null) return true;
+    if(root->lhs == null && root->rhs == null) return true;
+    return false;
+}
+
+
+
+// ROTATING
+void meowlloc_rbtree_rotateLeft(Meowlloc_RbtreeGeneration gen, bool rotate, Meowlloc_HeaderBlockFree **tree) {
+    if(rotate) gen = meowlloc_rbtree_rotateGeneration(gen, null);
+
+    Meowlloc_HeaderBlockFree *pivot = gen.grandfather->rhs;
+    gen.grandfather->rhs = pivot->lhs;
+    pivot->lhs = gen.grandfather;
+    *Meowlloc_rbtree_getChildPointer(gen.grandgrandfather, gen.grandfather, tree) = pivot;
+}
+
+void meowlloc_rbtree_rotateRight(Meowlloc_RbtreeGeneration gen, bool rotate, Meowlloc_HeaderBlockFree **tree) {
+    if(rotate) gen = meowlloc_rbtree_rotateGeneration(gen, null);
+
+    Meowlloc_HeaderBlockFree *pivot = gen.grandfather->lhs;
+    gen.grandfather->lhs = pivot->rhs;
+    pivot->rhs = gen.grandfather;
+    *Meowlloc_rbtree_getChildPointer(gen.grandgrandfather, gen.grandfather, tree) = pivot;
+}
+
+
+// SEARCHING
+Meowlloc_RbtreeGeneration meowlloc_rbtree_findSmallest(Meowlloc_HeaderBlockFree *root, Meowlloc_RbtreeGeneration gen) {
+    gen = meowlloc_rbtree_rotateGeneration(gen, root);
+    if(root == null || root->lhs == null) return gen;
+    return meowlloc_rbtree_findSmallest(root->lhs, gen);
+}
+
+Meowlloc_RbtreeGeneration meowlloc_rbtree_findBiggest(Meowlloc_HeaderBlockFree *root, Meowlloc_RbtreeGeneration gen) {
+    gen = meowlloc_rbtree_rotateGeneration(gen, root);
+    if(root == null || root->rhs == null) return gen;
+    return meowlloc_rbtree_findSmallest(root->rhs, gen);
+}
 
 // NOTE: this searches for the smallest fitting block, but this might not be optimal wrt fragmentation idk
 Meowlloc_RbtreeGeneration meowlloc_rbtree_findBestBlockRec(Meowlloc_RbtreeGeneration gen, size_t requestedSize) {
@@ -56,12 +136,7 @@ Meowlloc_RbtreeGeneration meowlloc_rbtree_findBestBlock(Meowlloc_HeaderBlockFree
 
 
 
-
-
-Meowlloc_HeaderBlockFree **Meowlloc_rbtree_getChildPointer(Meowlloc_HeaderBlockFree *root, Meowlloc_HeaderBlockFree *child, Meowlloc_HeaderBlockFree **tree) {
-    return (root != null) ? (root->lhs == child ? &root->lhs : &root->rhs) : tree;
-}
-
+// INSERT
 Meowlloc_RbtreeGeneration meowlloc_rbtree_insertBlockRec(Meowlloc_HeaderBlockFree *root, Meowlloc_HeaderBlockFree *block, Meowlloc_RbtreeGeneration gen) {
     if(root == null) {
         gen = meowlloc_rbtree_rotateGeneration(gen, block);
@@ -80,53 +155,6 @@ Meowlloc_RbtreeGeneration meowlloc_rbtree_insertBlockRec(Meowlloc_HeaderBlockFre
         gen = meowlloc_rbtree_rotateGeneration(gen, candidate);
         return meowlloc_rbtree_insertBlockRec(candidate, block, gen);
     }
-}
-
-Meowlloc_RbtreeGeneration meowlloc_rbtree_getGeneration(Meowlloc_HeaderBlockFree *root, Meowlloc_HeaderBlockFree *needle, Meowlloc_RbtreeGeneration gen) {
-    gen = meowlloc_rbtree_rotateGeneration(gen, root);
-    if(root == needle) return gen;
-
-    if(needle->header.size > root->header.size) {
-        return meowlloc_rbtree_getGeneration(root->rhs, needle, gen);
-    }
-    else {
-        return meowlloc_rbtree_getGeneration(root->lhs, needle, gen);
-    }
-}
-
-void meowlloc_rbtree_printNode(Meowlloc_HeaderBlockFree *node, bool newLine) {
-    if(node == null) {
-        printf("null");
-    }
-    else {
-        printf("%ld%c (", node->header.size & ~MEOWLLOC_RBTREE_RED, MEOWLLOC_RBTREE_ISRED(node) ? 'r' : 'b');
-        meowlloc_rbtree_printNode(node->lhs, false);
-        printf(", ");
-        meowlloc_rbtree_printNode(node->rhs, false);
-        printf(")");
-    }
-
-    if(newLine) {
-        printf("\n");
-    }
-}
-
-void meowlloc_rbtree_rotateLeft(Meowlloc_RbtreeGeneration gen, bool rotate, Meowlloc_HeaderBlockFree **tree) {
-    if(rotate) gen = meowlloc_rbtree_rotateGeneration(gen, null);
-
-    Meowlloc_HeaderBlockFree *pivot = gen.grandfather->rhs;
-    gen.grandfather->rhs = pivot->lhs;
-    pivot->lhs = gen.grandfather;
-    *Meowlloc_rbtree_getChildPointer(gen.grandgrandfather, gen.grandfather, tree) = pivot;
-}
-
-void meowlloc_rbtree_rotateRight(Meowlloc_RbtreeGeneration gen, bool rotate, Meowlloc_HeaderBlockFree **tree) {
-    if(rotate) gen = meowlloc_rbtree_rotateGeneration(gen, null);
-
-    Meowlloc_HeaderBlockFree *pivot = gen.grandfather->lhs;
-    gen.grandfather->lhs = pivot->rhs;
-    pivot->rhs = gen.grandfather;
-    *Meowlloc_rbtree_getChildPointer(gen.grandgrandfather, gen.grandfather, tree) = pivot;
 }
 
 void meowlloc_rbtree_insertBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_HeaderBlockFree *block) {
@@ -190,18 +218,8 @@ void meowlloc_rbtree_insertBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_Heade
 
 
 
-Meowlloc_RbtreeGeneration meowlloc_rbtree_findSmallest(Meowlloc_HeaderBlockFree *root, Meowlloc_RbtreeGeneration gen) {
-    gen = meowlloc_rbtree_rotateGeneration(gen, root);
-    if(root == null || root->lhs == null) return gen;
-    return meowlloc_rbtree_findSmallest(root->lhs, gen);
-}
 
-Meowlloc_RbtreeGeneration meowlloc_rbtree_findBiggest(Meowlloc_HeaderBlockFree *root, Meowlloc_RbtreeGeneration gen) {
-    gen = meowlloc_rbtree_rotateGeneration(gen, root);
-    if(root == null || root->rhs == null) return gen;
-    return meowlloc_rbtree_findSmallest(root->rhs, gen);
-}
-
+// REMOVE
 void meowlloc_rbtree_removeBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_HeaderBlockFree *node, Meowlloc_RbtreeGeneration gen) {
     if(node->lhs != null && node->rhs != null) {
         Meowlloc_RbtreeGeneration clhsGen = meowlloc_rbtree_findBiggest(node->lhs, (Meowlloc_RbtreeGeneration){ .this = node });
@@ -336,7 +354,6 @@ void meowlloc_rbtree_removeBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_Heade
 
         gen.parent->header.size &= ~MEOWLLOC_RBTREE_RED;
 
-        Meowlloc_HeaderBlockFree *preserve = gen.this;
         if(gen.this == gen.parent->lhs) {
             brother->rhs->header.size &= ~MEOWLLOC_RBTREE_RED;
             meowlloc_rbtree_rotateLeft(gen, true, tree);
@@ -345,8 +362,6 @@ void meowlloc_rbtree_removeBlock(Meowlloc_HeaderBlockFree **tree, Meowlloc_Heade
             brother->lhs->header.size &= ~MEOWLLOC_RBTREE_RED;
             meowlloc_rbtree_rotateRight(gen, true, tree);
         }
-
-        gen.this = preserve;
 
         break;
     } while(0);
