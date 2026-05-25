@@ -92,6 +92,7 @@ char *meowlloc_internal_newArena(size_t desiredAllocationSize) {
     return arena;
 }
 
+// NOTE: MUST NOT merge blocks that are currently in the tree (red/black bit)
 void meowlloc_internal_mergeBlocks(Meowlloc_HeaderBlock *lhs, Meowlloc_HeaderBlock *rhs) {
     Meowlloc_HeaderBlock *nextBlock = meowlloc_internal_getNextBlock(lhs);
     assert(nextBlock == rhs);
@@ -99,6 +100,7 @@ void meowlloc_internal_mergeBlocks(Meowlloc_HeaderBlock *lhs, Meowlloc_HeaderBlo
     lhs->size += (SZ(rhs->size) + sizeof(Meowlloc_HeaderBlock));
 }
 
+// NOTE: MUST NOT split block that is currently in the tree (red/black bit)
 Meowlloc_HeaderBlock *meowlloc_internal_splitBlock(Meowlloc_HeaderBlock *lhs, size_t take, bool discardLhsHeader) {
     // NOTE: used for realloc
     if(discardLhsHeader) {
@@ -115,6 +117,27 @@ Meowlloc_HeaderBlock *meowlloc_internal_splitBlock(Meowlloc_HeaderBlock *lhs, si
     lhs->size = taken * sizeof(Meowlloc_HeaderBlock);
 
     return rhs;
+}
+
+Meowlloc_HeaderBlock *meowlloc_internal_findFirstBlock(Meowlloc_HeaderBlock *any) {
+    if(meowlloc_internal_isFinal(any)) return ((Meowlloc_HeaderBlockFinal *)any)->initial;
+    return meowlloc_internal_findFirstBlock(meowlloc_internal_getNextBlock(any));
+}
+
+void meowlloc_internal_visualizeArena(Meowlloc_HeaderBlock *any) {
+    if(any == null) {
+        printf("[ null ]\n");
+        return;
+    }
+
+    Meowlloc_HeaderBlock *this = meowlloc_internal_findFirstBlock(any);
+
+    while(!meowlloc_internal_isFinal(this)) {
+        printf("[ %c %ld ] ", this->isReserved ? 'X' : 'O', SZ(this->size));
+        this = meowlloc_internal_getNextBlock(this);
+    }
+
+    printf("\n");
 }
 
 
@@ -163,25 +186,64 @@ void *meowlloc_allocate(size_t size) {
     return result;
 }
 
-// TODO: split into shrink/expand
-void *meowlloc_reallocate(void *old, size_t newSize) {
-    Meowlloc_HeaderBlock *block = old;
-    block -= 1;
+void *meowlloc_reallocate_shrink(Meowlloc_HeaderBlock *block, size_t newSize) {
+    size_t remainingSize = SZ(block->size) - newSize;
 
+    if(remainingSize >= sizeof(Meowlloc_HeaderBlockFree)) {
+        Meowlloc_HeaderBlock *rhs = meowlloc_internal_splitBlock(block, newSize, false);
+        meowlloc_rbtree_insertBlock(&MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)rhs);
+    }
+
+    return (block + 1);
+}
+
+void *meowlloc_reallocate_expand(Meowlloc_HeaderBlock *block, size_t newSize) {
     Meowlloc_HeaderBlock *nextBlock = meowlloc_internal_getNextBlock(block);
-    bool canMergeWithNext = !meowlloc_internal_isFinal(nextBlock) && !nextBlock->isReserved;
+    bool canMergeWithNext = !meowlloc_internal_isFinal(nextBlock) && !nextBlock->isReserved && newSize <= SZ(block->size) + sizeof(Meowlloc_HeaderBlock) + SZ(nextBlock->size);
 
     if(canMergeWithNext) {
-        // TODO: merge with next lol
-        // Meowlloc_HeaderBlock *rhs = meowlloc_internal_splitBlock(&gen.this->header, size, false);
-        // meowlloc_rbtree_insertBlock(&MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)rhs);
-        return null;
+        meowlloc_rbtree_removeBlock(&MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)nextBlock, meowlloc_rbtree_getGeneration(MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)nextBlock, (Meowlloc_RbtreeGeneration){0}));
+
+        size_t expandSize = newSize - SZ(block->size);
+        if(sizeof(Meowlloc_HeaderBlock) + SZ(nextBlock->size) - expandSize >= sizeof(Meowlloc_HeaderBlockFree)) {
+            Meowlloc_HeaderBlock *rhs = meowlloc_internal_splitBlock(nextBlock, expandSize, true);
+            meowlloc_rbtree_insertBlock(&MEOWLLOC_TREE, (Meowlloc_HeaderBlockFree *)rhs);
+        }
+
+        meowlloc_internal_mergeBlocks(block, nextBlock);
+
+        return (block + 1);
     }
     else {
         void *new = meowlloc_allocate(newSize);
-        memcpy(new, old, newSize < SZ(block->size) ? newSize : SZ(block->size));
-        meowlloc_free(old);
+        memcpy(new, (block + 1), SZ(block->size));
+        meowlloc_free(block + 1);
         return new;
+    }
+}
+
+void *meowlloc_reallocate(void *old, size_t newSize) {
+    if(old == null) {
+        return meowlloc_allocate(newSize);
+    }
+
+    if(newSize == 0) {
+        meowlloc_free(old);
+        return null;
+    }
+
+    Meowlloc_HeaderBlock *block = old;
+    block -= 1;
+
+    assert(block->isReserved);
+
+    newSize = meowlloc_internal_sizeToHeaders(newSize) * sizeof(Meowlloc_HeaderBlock);
+
+    if(newSize > SZ(block->size)) {
+        return meowlloc_reallocate_expand(block, newSize);
+    }
+    else {
+        return meowlloc_reallocate_shrink(block, newSize);
     }
 }
 
@@ -190,6 +252,8 @@ void meowlloc_free(void *old) {
 
     Meowlloc_HeaderBlock *block = old;
     block -= 1;
+
+    assert(block->isReserved);
 
     Meowlloc_HeaderBlock *previousBlock = block->previous;
     bool canMergeWithPrevious = (previousBlock != block && !previousBlock->isReserved);
@@ -214,7 +278,7 @@ void meowlloc_free(void *old) {
         nextBlock->previous = block;
     }
 
-    memset(block + 1, MEOWLLOC_SENTINEL_FREED, block->size);
+    memset(block + 1, MEOWLLOC_SENTINEL_FREED, SZ(block->size));
     Meowlloc_HeaderBlockFree *freeBlock = (Meowlloc_HeaderBlockFree *)block;
     freeBlock->header.isReserved = false;
 
@@ -226,7 +290,7 @@ void meowlloc_free(void *old) {
     // these arenas are still munmappble, as long as another alloc/free is performed. So the worst case
     // scenario is having 1 unused arena.
     if(meowlloc_internal_isSingleBlock(block) && MEOWLLOC_TREE != null) {
-        munmap(block, sizeof(Meowlloc_HeaderBlock) + block->size + sizeof(Meowlloc_HeaderBlockFinal));
+        munmap(block, sizeof(Meowlloc_HeaderBlock) + SZ(block->size) + sizeof(Meowlloc_HeaderBlockFinal));
     }
     else {
         meowlloc_rbtree_insertBlock(&MEOWLLOC_TREE, freeBlock);

@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stddef.h>
 
-#define MEOWLLOC_CONFIG_ALIGNMENT 8
+#define MEOWLLOC_CONFIG_ALIGNMENT 16
 #include "meowlloc.c"
 
 
@@ -88,21 +88,26 @@ int main() {
 
     meowlloc_rbtree_printNode(tree, true);
 
-    meowlloc_rbtree_removeBlock(&tree, &block2, meowlloc_rbtree_getGeneration(tree, &block2, (Meowlloc_RbtreeGeneration){0}));
+    meowlloc_rbtree_removeBlock(&tree, &block2,  meowlloc_rbtree_getGeneration(tree, &block2,  (Meowlloc_RbtreeGeneration){0}));
     meowlloc_rbtree_removeBlock(&tree, &block32, meowlloc_rbtree_getGeneration(tree, &block32, (Meowlloc_RbtreeGeneration){0}));
     meowlloc_rbtree_printNode(tree, true);
 
 
-    printf("TREE\n");
-    meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
-    int *allocation_0 = meowlloc_allocate(5);
-    meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
-    int *allocation_1 = meowlloc_allocate(5);
-    meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
-    meowlloc_free(allocation_0);
-    meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
-    meowlloc_free(allocation_1);
-    meowlloc_rbtree_printNode(MEOWLLOC_TREE, true);
+
+#define print \
+    meowlloc_internal_visualizeArena(&MEOWLLOC_TREE->header); \
+    meowlloc_rbtree_printNode(MEOWLLOC_TREE, true); \
+    printf("\n")
+
+    printf("TREE\n\n");
+
+    print;
+    int *allocation_0 = meowlloc_allocate(16); print;
+    int *allocation_1 = meowlloc_allocate(16); print;
+    allocation_1 = meowlloc_reallocate(allocation_1, 17); print;
+    allocation_0 = meowlloc_reallocate(allocation_0, 17); print;
+    meowlloc_free(allocation_0); print;
+    meowlloc_free(allocation_1); print;
 
 
     return 0;

@@ -32,18 +32,19 @@ struct Meowlloc_HeaderBlock {
     };
 };
 
-// NOTE: assuming that sizeof(Meowlloc_HeaderBlock) == 16, alignment less than that (1, 2, 4, 8) is already supported,
-// and any power of two greater than that is also trivially supported using _alignmentPadding
-_Static_assert(sizeof(Meowlloc_HeaderBlock) % MEOWLLOC_CONFIG_ALIGNMENT == 0, "Alignment must be a power of two");
-
 
 // NOTE: if header.isReserved == false
 typedef struct Meowlloc_HeaderBlockFree Meowlloc_HeaderBlockFree;
 struct Meowlloc_HeaderBlockFree {
     Meowlloc_HeaderBlock header;
 
-    Meowlloc_HeaderBlockFree *lhs;
-    Meowlloc_HeaderBlockFree *rhs;
+    union {
+        struct {
+            Meowlloc_HeaderBlockFree *lhs;
+            Meowlloc_HeaderBlockFree *rhs;
+        };
+        char _alignmentPadding[MEOWLLOC_CONFIG_ALIGNMENT];
+    };
 };
 
 
@@ -51,8 +52,22 @@ struct Meowlloc_HeaderBlockFree {
 typedef struct {
     Meowlloc_HeaderBlock header;
 
-    Meowlloc_HeaderBlock *initial;
-    void *_padding; // NOTE: probably not necessary, just so that sizeof(Meowlloc_HeaderBlockFinal) == sizeof(Meowlloc_HeaderBlockFree)
+    union {
+        struct {
+            Meowlloc_HeaderBlock *initial;
+            void *_padding;
+        };
+        char _alignmentPadding[MEOWLLOC_CONFIG_ALIGNMENT];
+    };
 } Meowlloc_HeaderBlockFinal;
+
+
+
+// NOTE: assuming that sizeof(Meowlloc_HeaderBlock) == 16, alignment less than that (1, 2, 4, 8) is already supported,
+// and any power of two greater than that is also trivially supported using _alignmentPadding
+_Static_assert(sizeof(Meowlloc_HeaderBlock) % MEOWLLOC_CONFIG_ALIGNMENT == 0, "Alignment must be a power of two");
+
+_Static_assert(sizeof(Meowlloc_HeaderBlock) * 2  == sizeof(Meowlloc_HeaderBlockFree), "Bad");
+_Static_assert(sizeof(Meowlloc_HeaderBlockFinal) == sizeof(Meowlloc_HeaderBlockFree), "Bad");
 
 #endif // __MEOWLLOC_INTERNAL_H
